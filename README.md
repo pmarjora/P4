@@ -22,3 +22,5 @@ Files that should be commited include
 
   - data
   - very large files
+
+Only files inside folders will be displayed on the website.
