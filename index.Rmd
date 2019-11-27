@@ -7,7 +7,26 @@ knitr::opts_chunk$set(echo = TRUE)
 library(htmltools)
 ```
 
-## P4 projects
+# P4 projects
+
+```{css, echo=FALSE}
+@import url(https://fonts.googleapis.com/css?family=Montserrat);
+
+body {
+  font-size: 25px;
+  font-family:Montserrat
+}
+
+h1 {
+    text-align: center;
+    font-size: 3em;
+}
+
+dd {
+    margin-left: 50px;
+}
+```
+
 
 ```{r, echo=FALSE}
 library(fs)
