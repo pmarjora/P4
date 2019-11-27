@@ -1,0 +1,52 @@
+---
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(htmltools)
+```
+
+# P4 projects
+
+```{css, echo=FALSE}
+@import url(https://fonts.googleapis.com/css?family=Montserrat);
+
+body {
+  font-size: 25px;
+  font-family:Montserrat
+}
+
+h1 {
+    text-align: center;
+    font-size: 3em;
+}
+
+dd {
+    margin-left: 50px;
+}
+```
+
+
+```{r, echo=FALSE}
+library(fs)
+
+foldes <- dir_ls(type = "directory")
+
+
+expand_folder <- function(folder) {
+  c(
+    list(tags$dt(folder)),
+    purrr::map(dir_ls(folder, regexp = "\\.html$"), ~ tags$dd(tags$a(.x, href = .x)))
+  )
+}
+
+```
+
+```{r, echo=FALSE}
+withTags(
+  dl(
+    purrr::map(foldes, expand_folder)
+  )
+)
+```

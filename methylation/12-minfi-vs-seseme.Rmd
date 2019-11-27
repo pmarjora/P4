@@ -1,0 +1,289 @@
+---
+title: "Minfi vs sesame comparison"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, message = FALSE, warning = FALSE)
+```
+
+## Setup
+
+Loading packages
+
+```{r, message=FALSE, warning=FALSE}
+library(minfi)
+library(sesame)
+library(tidyverse)
+```
+
+Below is a custom function to go from idat files to beta values using **minfi**.
+
+```{r}
+idat_to_beta_values_noob <- function(...) {
+  RGset <- read.metharray.exp(...)
+  RGset@annotation = c(array = "IlluminaHumanMethylationEPIC", annotation = "ilm10b4.hg19")
+
+  MSet.noob <- preprocessNoob(RGset, offset = 15, dyeCorr = TRUE, verbose = TRUE)
+
+  ratioSet.noob <- ratioConvert(MSet.noob, what =  "both", keepCN = TRUE)
+  beta.noob <- getBeta(ratioSet.noob)
+  beta.noob
+}
+```
+
+```{r}
+idat_folder <- "~/Data/methylation/idat"
+data_directory <- "~/Data/methylation/directory.csv"
+```
+
+
+## Minfi
+
+Example of extraction of beta values for 1 sample using **minfi**.
+
+```{r, message=FALSE}
+minfi_data <- idat_to_beta_values_noob(
+  base = idat_folder, 
+  targets = data.frame(Basename = "200514030126_R06C01", 
+                       stringsAsFactors = FALSE)
+)
+```
+
+Plotting the distribution gives us a bimodal distribution.
+
+```{r}
+tibble(beta = minfi_data[, 1]) %>%
+  ggplot(aes(beta)) +
+  geom_histogram(bins = 100)
+```
+
+## Sessme
+
+Example of extraction of beta values for 1 sample using **sesame**.
+
+```{r}
+sesame_data <- openSesame(file.path(idat_folder, "200514030126_R06C01"))
+```
+
+Plotting the distribution gives us a bimodal distribution. `NA` were dropped before plotting. 
+
+```{r}
+tibble(beta = sesame_data) %>%
+  drop_na() %>%
+  ggplot(aes(beta)) +
+  geom_histogram(bins = 100)
+```
+
+## Visual comparison
+
+The following function takes a vector of basenames and extracts the beta values using **minfi** and **sesame**. Sesame it set to perform pOOBAH masking which will show up as missing values.
+
+```{r}
+com_data <- function(x) {
+  minfi_beta <- idat_to_beta_values_noob(base = idat_folder, 
+                         targets = data.frame(Basename = x, 
+                                              stringsAsFactors = FALSE))
+  
+  sesame_beta <- openSesame(file.path(idat_folder, x))
+  
+  data.frame(package = rep(c("minfi", "sesame"), c(length(minfi_beta), length(sesame_beta))),
+             beta = c(minfi_beta[, 1], sesame_beta),
+             site = c(rownames(minfi_beta), names(sesame_beta)),
+             stringsAsFactors = FALSE)
+}
+```
+
+A single sample is used and frequency polygons is created of the densities.
+
+```{r}
+sample_1 <- com_data(x = "200514030126_R06C01")
+
+sample_1 %>%
+  ggplot(aes(beta, color = package)) +
+  geom_freqpoly(bins = 100)
+```
+
+## Investigate by plate and well id
+
+The following function takes two arguments, plate and well and plots the density chart.
+
+```{r}
+com_plot <- function(plate, well) {
+  read_csv(data_directory, 
+         col_types = cols_only(
+           plate = col_double(),
+           well_position = col_character(),
+           basename = col_character()
+           )
+         ) %>%
+  filter(plate == .env$plate, well_position == well) %>%
+  pull(basename) %>%
+  com_data() %>%
+  ggplot(aes(beta, color = package)) +
+  geom_freqpoly(bins = 100) +
+  labs(title = paste0(plate, "-", well))
+}
+```
+
+```{r, message=FALSE, warning=FALSE}
+com_plot(1378, "F01")
+com_plot(1378, "H01")
+com_plot(1385, "C01")
+com_plot(1387, "H04")
+com_plot(1464, "B01")
+com_plot(1483, "A11")
+```
+
+## Comparing amount of masking by region
+
+Following function take the arguments plate and well and returns the result of beta estimation. Works the same as `com_data` but input is plate and well instead of basename.
+
+```{r}
+com_region <- function(plate, well) {
+  base_names <- read_csv(data_directory, 
+         col_types = cols_only(
+           plate = col_double(),
+           well_position = col_character(),
+           basename = col_character()
+           )
+         ) %>%
+  filter(plate == .env$plate, well_position == well) %>%
+  pull(basename)
+  
+  betas <- openSesame(file.path(idat_folder, base_names))
+  
+  tibble(site = names(betas),
+         beta = betas,
+         sample = paste(plate, well))
+}
+```
+
+Following charts showchange the total count within each region compared to the count of masked cpgs.
+
+```{r}
+island_ref <- tibble(
+island = Islands.UCSC@listData$Relation_to_Island,
+rownames = Islands.UCSC@rownames
+)
+```
+
+
+```{r}
+ddd <- com_region(1378, "F01")
+
+ddd %>%
+  left_join(island_ref, by = c("site" = "rownames")) %>%
+  group_by(island) %>%
+  summarise(count = n(),
+            is_na = sum(is.na(beta))) %>%
+  pivot_longer(count:is_na) %>%
+  ggplot(aes(island, value, fill = name)) +
+  geom_col(position = "dodge")
+
+ddd %>%
+  left_join(island_ref, by = c("site" = "rownames")) %>%
+  group_by(island) %>%
+  summarise(pro_na = sum(is.na(beta)) / n()) %>%
+  ggplot(aes(island, pro_na)) +
+  geom_col()
+```
+
+## All the sample
+
+Here we calculate the beta values for all the sample labeled as "tumor gland".
+
+```{r all_data}
+all_data <- read_csv(data_directory) %>%
+  filter(description == "tumor gland") %>%
+  select(plate, well_position) %>%
+  pmap_dfr(~ com_region(.x, .y))
+```
+
+### Islands regions
+
+Each sample is represented by a point in each column.
+
+```{r, dependson="all_data"}
+all_data %>%
+   left_join(island_ref, by = c("site" = "rownames")) %>%
+  group_by(sample, island) %>%
+  summarise(pro_na = sum(is.na(beta)) / n()) %>%
+  ggplot(aes(island, pro_na)) +
+  geom_jitter(height = 0, width = 0.2)
+```
+
+A connected line chart shows that the variability of the procentage of masked points don't overlap.
+
+```{r, dependson="all_data"}
+all_data %>%
+  mutate(island = Islands.UCSC@listData$Relation_to_Island[match(site, Islands.UCSC@rownames)]) %>%
+  group_by(sample, island) %>%
+  summarise(pro_na = sum(is.na(beta)) / n()) %>%
+  ggplot(aes(island, pro_na)) +
+  geom_line(aes(group = sample))
+```
+
+Below is a side by side comparrison between the number of sites within each region (on the left) and the procentages of cpg site for which at least of the the `r read_csv("~/Data/methylation/directory.csv") %>%
+  filter(description == "tumor gland") %>% nrow()` sample have been masked.
+
+```{r, dependson="all_data"}
+fff <- all_data %>%
+  group_by(site) %>%
+  summarise(union_na = any(is.na(beta))) %>%
+  mutate(island = Islands.UCSC@listData$Relation_to_Island[match(site, Islands.UCSC@rownames)]) 
+
+fff %>%
+  group_by(island) %>%
+  summarise(count = n(),
+            procent = mean(union_na)) %>%
+  pivot_longer(count:procent) %>%
+  mutate(name = factor(name, c("count", "procent"),
+                       c("Total cpg count", "Percentage of cpgs"))) %>%
+  ggplot(aes(island, value)) +
+  geom_col() +
+  coord_flip() +
+  facet_wrap(~name, scales = "free_x") +
+  labs(title = "how many cpg sites have at least 1 NA across all samples")
+```
+
+## Promotor regions
+
+Below is same plots as in islands regions but with promotor regions instead.
+
+```{r, dependson="all_data"}
+all_data %>%
+  mutate(island = Other@listData$Regulatory_Feature_Group[match(site, Other@rownames)]) %>%
+  mutate(promotor = island == "Promoter_Associated") %>%
+  group_by(sample, promotor) %>%
+  summarise(pro_na = sum(is.na(beta)) / n()) %>%
+  ggplot(aes(promotor, pro_na)) +
+  geom_jitter(height = 0, width = 0.2)
+```
+
+```{r, dependson="all_data"}
+fffpro <- all_data %>%
+  group_by(site) %>%
+  summarise(union_na = any(is.na(beta))) %>%
+  mutate(island = Other@listData$Regulatory_Feature_Group[match(site, Other@rownames)]) %>%
+  mutate(promotor = island == "Promoter_Associated") 
+
+fffpro %>%
+  group_by(island) %>%
+  summarise(count = n(),
+            procent = mean(union_na)) %>%
+  pivot_longer(count:procent) %>%
+  mutate(name = factor(name, c("count", "procent"),
+                       c("Total cpg count", "Percentage of cpgs"))) %>%
+  ggplot(aes(island, value)) +
+  geom_col() +
+  coord_flip() +
+  facet_wrap(~name, scales = "free_x") +
+  labs(title = "how many cpg sites have at least 1 NA across all samples")
+```
+
+
+
