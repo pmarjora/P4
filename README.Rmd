@@ -11,7 +11,7 @@ knitr::opts_chunk$set(
 )
 ```
 
-# P4 code chare repository
+# P4 code share repository
 
 <!-- badges: start -->
 [![Travis build status](https://travis-ci.org/USCbiostats/P4.svg?branch=master)](https://travis-ci.org/USCbiostats/P4)
